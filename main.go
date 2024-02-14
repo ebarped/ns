@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 
@@ -23,7 +24,7 @@ func main() {
 		log.Fatalf("error: you can only pass 1 argument, the namespace name!\n")
 	}
 	targetNamespace := os.Args[1]
-	log.Printf("switching to namespace %q\n", targetNamespace)
+	fmt.Printf("switching to namespace %q\n", targetNamespace)
 
 	homePath, err := os.UserHomeDir()
 	if err != nil {
