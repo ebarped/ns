@@ -20,39 +20,83 @@ const (
 )
 
 func main() {
-	if len(os.Args) != 2 { // start in interactive mode
-		log.Fatalf("error: you can only pass 1 argument, the namespace name!\n")
-	}
-	targetNamespace := os.Args[1]
-	fmt.Printf("switching to namespace %q\n", targetNamespace)
+	nArgs := len(os.Args)
 
-	homePath, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("error: %s\n", err)
-	}
-	kubeconfigPath := homePath + "/" + KUBECONFIG_DIR
+	switch nArgs {
+	case 1:
+		homePath, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+		kubeconfigPath := homePath + "/" + KUBECONFIG_DIR
+		currentNs, err := GetYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML)
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+		fmt.Println(currentNs)
+	case 2:
+		targetNamespace := os.Args[1]
+		fmt.Printf("switching to namespace %q\n", targetNamespace)
 
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-	if err != nil {
-		log.Fatalf("error: %s\n", err)
-	}
-	kubeClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Fatalf("error: %s\n", err)
+		homePath, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+		kubeconfigPath := homePath + "/" + KUBECONFIG_DIR
+
+		config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+		kubeClient, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+
+		myNs, err := kubeClient.CoreV1().Namespaces().Get(context.TODO(), targetNamespace, metav1.GetOptions{})
+		if err != nil {
+			log.Printf("error: %s\n", err)
+		}
+
+		err = UpdateYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML, myNs.Name)
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+	default:
+		log.Fatalf("error: incorrect number of arguments (0 or 1!)\n")
 	}
 
-	mins, err := kubeClient.CoreV1().Namespaces().Get(context.TODO(), targetNamespace, metav1.GetOptions{})
-	if err != nil {
-		log.Printf("error: %s\n", err)
-	}
-
-	err = UpdateYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML, mins.Name)
-	if err != nil {
-		log.Fatalf("error: %s\n", err)
-	}
 }
 
-// UpdateYamlField reads a yaml file and modify one field (using a jq-like selector) with the desired value
+// UpdateYamlField reads a yaml file and returns one field
+func GetYamlField(file, field string) (string, error) {
+	// open the config file and transform to json (so we can modify it with dasel)
+	yFile, err := os.ReadFile(file)
+	if err != nil {
+		return "", err
+	}
+
+	jFile, err := yaml.YAMLToJSON(yFile)
+	if err != nil {
+		return "", err
+	}
+
+	// manipulate the data with dasel library
+	var data interface{}
+	err = json.Unmarshal(jFile, &data)
+	if err != nil {
+		return "", err
+	}
+
+	result, err := dasel.Select(data, field)
+	if err != nil {
+		return "", err
+	}
+	currentNs := result[0].String()
+	return currentNs, nil
+}
+
+// UpdateYamlField reads a yaml file and modify one field with the desired value
 func UpdateYamlField(file, field, value string) error {
 	// open the config file and transform to json (so we can modify it with dasel)
 	yFile, err := os.ReadFile(file)
