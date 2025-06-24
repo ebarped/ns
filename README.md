@@ -32,3 +32,7 @@ Executed in    2.91 secs      fish           external
    usr time  470.16 millis  550.00 micros  469.61 millis
    sys time  168.49 millis  142.00 micros  168.35 millis                                                                                                                 
 ```
+
+TODO:
+- enhance error handling
+- if the kubeconfig does not have an existing namespace field, it wont print anything 

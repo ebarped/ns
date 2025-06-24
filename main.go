@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
+	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/tomwright/dasel/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -19,43 +22,77 @@ const (
 	CONTEXT_SELECTOR_YAML = ".contexts.[0].context.namespace"
 )
 
+var kubeconfigPath string
+
 func main() {
 	nArgs := len(os.Args)
 
-	switch nArgs {
-	case 1:
+	current := flag.Bool("current", false, "Print current namespace")
+	flag.Parse()
+
+	// just display current namespace
+	if *current {
 		homePath, err := os.UserHomeDir()
 		if err != nil {
 			log.Fatalf("error: %s\n", err)
 		}
-		kubeconfigPath := homePath + "/" + KUBECONFIG_DIR
+		kubeconfigPath = filepath.Join(homePath, KUBECONFIG_DIR)
 		currentNs, err := GetYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML)
+		if err != nil {
+			log.Fatalf("error parsing namespace field of kubeconfig: %s\n", err)
+		}
+		fmt.Println(currentNs)
+		os.Exit(0)
+	}
+
+	switch nArgs {
+	case 1: // display fuzzyfinder with the namespaces
+		kubeClient := loadKubeConfig()
+
+		namespaces, err := kubeClient.CoreV1().Namespaces().List(
+			context.TODO(),
+			metav1.ListOptions{},
+		)
 		if err != nil {
 			log.Fatalf("error: %s\n", err)
 		}
-		fmt.Println(currentNs)
-	case 2:
+
+		namespacesSlice := make([]string, 0, len(namespaces.Items))
+		for _, ns := range namespaces.Items {
+			namespacesSlice = append(namespacesSlice, ns.Name)
+		}
+
+		idx, err := fuzzyfinder.Find(
+			namespacesSlice,
+			func(i int) string {
+				return namespacesSlice[i]
+			},
+			fuzzyfinder.WithPromptString(">  "),
+		)
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+
+		fmt.Printf("switching to namespace %q\n", namespacesSlice[idx])
+
+		err = UpdateYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML, namespacesSlice[idx])
+		if err != nil {
+			log.Fatalf("error: %s\n", err)
+		}
+
+	case 2: // switch to that namespace
 		targetNamespace := os.Args[1]
 		fmt.Printf("switching to namespace %q\n", targetNamespace)
 
-		homePath, err := os.UserHomeDir()
-		if err != nil {
-			log.Fatalf("error: %s\n", err)
-		}
-		kubeconfigPath := homePath + "/" + KUBECONFIG_DIR
+		kubeClient := loadKubeConfig()
 
-		config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		myNs, err := kubeClient.CoreV1().Namespaces().Get(
+			context.TODO(),
+			targetNamespace,
+			metav1.GetOptions{},
+		)
 		if err != nil {
-			log.Fatalf("error: %s\n", err)
-		}
-		kubeClient, err := kubernetes.NewForConfig(config)
-		if err != nil {
-			log.Fatalf("error: %s\n", err)
-		}
-
-		myNs, err := kubeClient.CoreV1().Namespaces().Get(context.TODO(), targetNamespace, metav1.GetOptions{})
-		if err != nil {
-			log.Printf("error: %s\n", err)
+			log.Fatalf("error looking for namespace %s: %s\n", myNs.Name, err)
 		}
 
 		err = UpdateYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML, myNs.Name)
@@ -65,7 +102,6 @@ func main() {
 	default:
 		log.Fatalf("error: incorrect number of arguments (0 or 1!)\n")
 	}
-
 }
 
 // UpdateYamlField reads a yaml file and returns one field
@@ -127,9 +163,30 @@ func UpdateYamlField(file, field, value string) error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(file, yOut, 0)
+	err = os.WriteFile(file, yOut, 0o400)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func loadKubeConfig() *kubernetes.Clientset {
+	homePath, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("error: %s\n", err)
+	}
+
+	kubeconfigPath = filepath.Join(homePath, KUBECONFIG_DIR)
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		log.Fatalf("error: %s\n", err)
+	}
+
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("error: %s\n", err)
+	}
+
+	return kubeClient
 }
