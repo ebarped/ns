@@ -36,12 +36,16 @@ func main() {
 		if err != nil {
 			log.Fatalf("error: %s\n", err)
 		}
+
 		kubeconfigPath = filepath.Join(homePath, KUBECONFIG_DIR)
+
 		currentNs, err := GetYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML)
 		if err != nil {
 			log.Fatalf("error parsing namespace field of kubeconfig: %s\n", err)
 		}
+
 		fmt.Println(currentNs)
+
 		os.Exit(0)
 	}
 
@@ -57,15 +61,10 @@ func main() {
 			log.Fatalf("error: %s\n", err)
 		}
 
-		namespacesSlice := make([]string, 0, len(namespaces.Items))
-		for _, ns := range namespaces.Items {
-			namespacesSlice = append(namespacesSlice, ns.Name)
-		}
-
 		idx, err := fuzzyfinder.Find(
-			namespacesSlice,
+			namespaces.Items,
 			func(i int) string {
-				return namespacesSlice[i]
+				return namespaces.Items[i].Name
 			},
 			fuzzyfinder.WithPromptString(">  "),
 		)
@@ -73,9 +72,9 @@ func main() {
 			log.Fatalf("error: %s\n", err)
 		}
 
-		fmt.Printf("switching to namespace %q\n", namespacesSlice[idx])
+		fmt.Printf("switching to namespace %q\n", namespaces.Items[idx].Name)
 
-		err = UpdateYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML, namespacesSlice[idx])
+		err = UpdateYamlField(kubeconfigPath, CONTEXT_SELECTOR_YAML, namespaces.Items[idx].Name)
 		if err != nil {
 			log.Fatalf("error: %s\n", err)
 		}
@@ -180,7 +179,7 @@ func loadKubeConfig() *kubernetes.Clientset {
 
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
-		log.Fatalf("error: %s\n", err)
+		log.Fatalf("error loading kubeconfig: %s\n", err)
 	}
 
 	kubeClient, err := kubernetes.NewForConfig(config)
